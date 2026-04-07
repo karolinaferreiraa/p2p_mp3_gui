@@ -188,7 +188,8 @@ class P2PGUI:
 
             self.listbox.delete(0, "end")
             if resposta.strip() == "NENHUM_ARQUIVO":
-                self.log("[LISTA] Nenhum arquivo remoto encontrado.")
+                self.log("[LISTA] Nenhum arquivo MP3 foi compartilhado pelo peer.")
+                messagebox.showwarning("Sem Arquivos", "O peer não possui nenhum arquivo MP3 compartilhado.")
                 return
 
             for linha in resposta.split("\n"):
@@ -198,7 +199,7 @@ class P2PGUI:
             self.log("[LISTA] Arquivos remotos atualizados.")
         except Exception as e:
             self.log(f"[ERRO LISTA] {e}")
-            messagebox.showerror("Erro", str(e))
+            messagebox.showerror("Erro na Listagem", f"Falha ao listar arquivos: {str(e)}")
 
     def download_selected(self):
         if not self.connected:
@@ -207,7 +208,7 @@ class P2PGUI:
 
         sel = self.listbox.curselection()
         if not sel:
-            messagebox.showwarning("Aviso", "Selecione um arquivo.")
+            messagebox.showwarning("Aviso", "Selecione um arquivo para baixar.")
             return
 
         nome = self.listbox.get(sel[0])
@@ -217,12 +218,37 @@ class P2PGUI:
                 self.client_socket.send(f"GET {nome}".encode())
                 resposta = self.client_socket.recv(BUFFER).decode()
 
-                if not resposta.startswith("OK"):
-                    self.log(f"[ERRO DOWNLOAD] {resposta}")
-                    messagebox.showerror("Erro", resposta)
+                # Tratamento de erro: arquivo não compartilhado
+                if resposta.startswith("ERRO"):
+                    erro_msg = resposta.replace("ERRO ", "")
+                    self.log(f"[ERRO DOWNLOAD] {erro_msg}")
+                    
+                    if "não encontrado" in erro_msg.lower():
+                        messagebox.showerror(
+                            "Arquivo Não Compartilhado",
+                            f"O arquivo '{nome}' não está mais compartilhado pelo peer.\n\n"
+                            f"Possíveis razões:\n"
+                            f"  • O arquivo foi deletado\n"
+                            f"  • O arquivo foi descompartilhado\n"
+                            f"  • A pasta de compartilhamento foi alterada\n\n"
+                            f"Clique em 'Listar MP3' para atualizar a lista."
+                        )
+                    else:
+                        messagebox.showerror("Erro no Download", erro_msg)
                     return
 
-                tamanho = int(resposta.split()[1])
+                if not resposta.startswith("OK"):
+                    self.log(f"[ERRO DOWNLOAD] Resposta inválida: {resposta}")
+                    messagebox.showerror("Erro", f"Resposta inesperada do servidor: {resposta}")
+                    return
+
+                try:
+                    tamanho = int(resposta.split()[1])
+                except (ValueError, IndexError):
+                    self.log(f"[ERRO DOWNLOAD] Não foi possível extrair o tamanho: {resposta}")
+                    messagebox.showerror("Erro", "Resposta do servidor inválida")
+                    return
+
                 self.client_socket.send("READY".encode())
 
                 destino = os.path.join(PASTA_RECEBIDOS, nome)
@@ -240,11 +266,17 @@ class P2PGUI:
                         self.root.after(0, self.update_progress, porcentagem, recebido, tamanho)
 
                 self.log(f"[DOWNLOAD CONCLUÍDO] {destino}")
-                messagebox.showinfo("Sucesso", f"Arquivo salvo em:\n{destino}")
+                messagebox.showinfo("Sucesso", f"Arquivo baixado com sucesso!\n\nSalvo em:\n{destino}")
 
+            except ConnectionResetError:
+                self.log(f"[ERRO DOWNLOAD] Conexão perdida com o peer")
+                messagebox.showerror("Erro de Conexão", "A conexão com o peer foi perdida.")
+            except FileNotFoundError as e:
+                self.log(f"[ERRO DOWNLOAD] Erro ao salvar arquivo: {e}")
+                messagebox.showerror("Erro de Sistema", f"Não foi possível salvar o arquivo.\n{str(e)}")
             except Exception as e:
                 self.log(f"[ERRO DOWNLOAD] {e}")
-                messagebox.showerror("Erro", str(e))
+                messagebox.showerror("Erro no Download", str(e))
 
         threading.Thread(target=download_thread, daemon=True).start()
 

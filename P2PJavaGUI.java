@@ -231,21 +231,31 @@ public class P2PJavaGUI extends JFrame {
                 saida.println("LIST");
                 SwingUtilities.invokeLater(() -> listModel.clear());
 
+                boolean temArquivos = false;
                 while (true) {
                     String linha = entrada.readLine();
                     if (linha == null) break;
                     if (linha.equals("NENHUM_ARQUIVO")) {
-                        log("[LISTA] Nenhum arquivo remoto encontrado.");
+                        log("[LISTA] Nenhum arquivo MP3 foi compartilhado pelo peer.");
+                        SwingUtilities.invokeLater(() -> 
+                            JOptionPane.showMessageDialog(this, 
+                                "O peer não possui nenhum arquivo MP3 compartilhado.", 
+                                "Sem Arquivos", 
+                                JOptionPane.WARNING_MESSAGE)
+                        );
                         break;
                     }
                     if (linha.equals("FIM_LISTA")) {
                         break;
                     }
+                    temArquivos = true;
                     String item = linha;
                     SwingUtilities.invokeLater(() -> listModel.addElement(item));
                 }
 
-                log("[LISTA] Arquivos remotos atualizados.");
+                if (temArquivos) {
+                    log("[LISTA] Arquivos remotos atualizados.");
+                }
             } catch (Exception ex) {
                 log("[ERRO LISTA] " + ex.getMessage());
             }
@@ -255,7 +265,7 @@ public class P2PJavaGUI extends JFrame {
     private void baixarArquivoSelecionado() {
         String nome = listArquivos.getSelectedValue();
         if (nome == null) {
-            JOptionPane.showMessageDialog(this, "Selecione um arquivo.", "Aviso", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(this, "Selecione um arquivo para baixar.", "Aviso", JOptionPane.WARNING_MESSAGE);
             return;
         }
         if (saida == null || entrada == null || inputStreamCliente == null) {
@@ -268,13 +278,72 @@ public class P2PJavaGUI extends JFrame {
                 saida.println("GET " + nome);
                 String resposta = entrada.readLine();
 
-                if (resposta == null || !resposta.startsWith("OK")) {
-                    log("[ERRO DOWNLOAD] " + resposta);
-                    JOptionPane.showMessageDialog(this, resposta, "Erro", JOptionPane.ERROR_MESSAGE);
+                // Tratamento de erro: arquivo não compartilhado
+                if (resposta == null) {
+                    log("[ERRO DOWNLOAD] Conexão perdida com o peer.");
+                    SwingUtilities.invokeLater(() ->
+                        JOptionPane.showMessageDialog(this, 
+                            "Conexão perdida com o peer.", 
+                            "Erro de Conexão", 
+                            JOptionPane.ERROR_MESSAGE)
+                    );
                     return;
                 }
 
-                long tamanho = Long.parseLong(resposta.split(" ")[1]);
+                if (resposta.startsWith("ERRO")) {
+                    String erroMsg = resposta.replace("ERRO ", "");
+                    log("[ERRO DOWNLOAD] " + erroMsg);
+                    
+                    if (erroMsg.toLowerCase().contains("não encontrado")) {
+                        String mensagem = "O arquivo '" + nome + "' não está mais compartilhado pelo peer.\n\n" +
+                                         "Possíveis razões:\n" +
+                                         "  • O arquivo foi deletado\n" +
+                                         "  • O arquivo foi descompartilhado\n" +
+                                         "  • A pasta de compartilhamento foi alterada\n\n" +
+                                         "Clique em 'Listar MP3' para atualizar a lista.";
+                        SwingUtilities.invokeLater(() ->
+                            JOptionPane.showMessageDialog(this, 
+                                mensagem, 
+                                "Arquivo Não Compartilhado", 
+                                JOptionPane.ERROR_MESSAGE)
+                        );
+                    } else {
+                        String fMsg = erroMsg;
+                        SwingUtilities.invokeLater(() ->
+                            JOptionPane.showMessageDialog(this, 
+                                fMsg, 
+                                "Erro no Download", 
+                                JOptionPane.ERROR_MESSAGE)
+                        );
+                    }
+                    return;
+                }
+
+                if (!resposta.startsWith("OK")) {
+                    log("[ERRO DOWNLOAD] Resposta inválida: " + resposta);
+                    SwingUtilities.invokeLater(() ->
+                        JOptionPane.showMessageDialog(this, 
+                            "Resposta inesperada do servidor: " + resposta, 
+                            "Erro", 
+                            JOptionPane.ERROR_MESSAGE)
+                    );
+                    return;
+                }
+
+                long tamanho;
+                try {
+                    tamanho = Long.parseLong(resposta.split(" ")[1]);
+                } catch (NumberFormatException | ArrayIndexOutOfBoundsException ex) {
+                    log("[ERRO DOWNLOAD] Não foi possível extrair o tamanho: " + resposta);
+                    SwingUtilities.invokeLater(() ->
+                        JOptionPane.showMessageDialog(this, 
+                            "Resposta do servidor inválida", 
+                            "Erro", 
+                            JOptionPane.ERROR_MESSAGE)
+                    );
+                    return;
+                }
+
                 saida.println("READY");
 
                 File destino = new File(PASTA_RECEBIDOS, nome);
@@ -300,9 +369,36 @@ public class P2PJavaGUI extends JFrame {
 
                 fos.close();
                 log("[DOWNLOAD CONCLUÍDO] " + destino.getPath());
-                JOptionPane.showMessageDialog(this, "Arquivo salvo em:\n" + destino.getPath());
+                SwingUtilities.invokeLater(() ->
+                    JOptionPane.showMessageDialog(this, 
+                        "Arquivo baixado com sucesso!\n\nSalvo em:\n" + destino.getPath(), 
+                        "Sucesso", 
+                        JOptionPane.INFORMATION_MESSAGE)
+                );
+            } catch (FileNotFoundException ex) {
+                log("[ERRO DOWNLOAD] Erro ao salvar arquivo: " + ex.getMessage());
+                SwingUtilities.invokeLater(() ->
+                    JOptionPane.showMessageDialog(this, 
+                        "Não foi possível salvar o arquivo.\n" + ex.getMessage(), 
+                        "Erro de Sistema", 
+                        JOptionPane.ERROR_MESSAGE)
+                );
+            } catch (IOException ex) {
+                log("[ERRO DOWNLOAD] Erro de I/O: " + ex.getMessage());
+                SwingUtilities.invokeLater(() ->
+                    JOptionPane.showMessageDialog(this, 
+                        "Erro ao transferir arquivo: " + ex.getMessage(), 
+                        "Erro de I/O", 
+                        JOptionPane.ERROR_MESSAGE)
+                );
             } catch (Exception ex) {
                 log("[ERRO DOWNLOAD] " + ex.getMessage());
+                SwingUtilities.invokeLater(() ->
+                    JOptionPane.showMessageDialog(this, 
+                        ex.getMessage(), 
+                        "Erro no Download", 
+                        JOptionPane.ERROR_MESSAGE)
+                );
             }
         }).start();
     }
